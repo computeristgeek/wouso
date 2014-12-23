@@ -1,4 +1,4 @@
-# WoUSO Romanian
+# WoUSO English
 # Copyright (C) 2011 wouso
 # This file is distributed under the same license as the PACKAGE package.
 # Alex Eftimie <alex@rosedu.org>, 2011
@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: wouso VERSION\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2012-10-30 23:19+0200\n"
-"PO-Revision-Date: 2012-10-30 23:28+0200\n"
+"PO-Revision-Date: 2014-12-23 02:10+0200\n"
 "Last-Translator: Matei Oprea <matei.oprea@rosedu.org>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
@@ -19,22 +19,22 @@ msgstr ""
 #: resources/templates/magic/bazaar.html:6
 #: resources/templates/magic/bazaar.html:7
 msgid "Magic"
-msgstr "Magie"
+msgstr "Magic"
 #: core/scoring/sm.py:136
 msgid "downgraded to level {level} and lost {amount} gold"
-msgstr "a coborât la nivelul {level} și a pierdut {amount} aur"
+msgstr "downgraded to level {level} and lost {amount} gold"
 #: core/scoring/sm.py:145
 msgid "upgraded to level {level} and received {amount} gold"
-msgstr "a promovat la nivelul {level} și a primit {amount} aur"
+msgstr "upgraded to level {level} and received {amount} gold"
 #: core/scoring/sm.py:253
 msgid "has joined the game."
-msgstr "a intrat în joc."
+msgstr "has joined the game."
 #: core/user/templatetags/user.py:46
 msgid "You"
-msgstr "Tu"
+msgstr "You"
 #: games/challenge/models.py:72
 msgid "used {artifact} to enable one more challenge."
-msgstr "a folosit {artifact} pentru a activa încă o provocare."
+msgstr "used {artifact} to enable one more challenge."
 #: games/challenge/models.py:222
 msgid "has refused challenge from {chall_from} (expired)"
 msgstr "a refuzat provocarea de la {chall_from} (expirată)"
