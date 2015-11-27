@@ -1,9 +1,13 @@
 import unittest
+
 from django.contrib.auth.models import User
 from django.test import TestCase
+
+from wouso.core.config.models import IntegerListSetting
 from wouso.core.magic.models import NoArtifactLevel
 from wouso.core.user.models import PlayerGroup, Race
 from wouso.games.challenge.models import ChallengeGame
+
 from . import get_god
 
 
@@ -26,6 +30,7 @@ class GodTestCase(TestCase):
         self.assertIsInstance(level, NoArtifactLevel)
 
     def test_get_level_limit(self):
+        IntegerListSetting.get('level_limits').set_value("80 125 180 245 320 450")
         god = get_god()
 
         self.assertEqual(god.get_level_for_points(0), 1)
@@ -47,11 +52,11 @@ class GodTestCase(TestCase):
 
         self.assertFalse(god.get_artifact_for_modifier('inexistant-modifier', self.player))
 
-    def test_others_are_not_elligible_for_challenge(self):
+    def test_unaffiliated_are_not_elligible_for_challenge(self):
         god = get_god()
-        others_race, new = Race.objects.get_or_create(name="Others", can_play=False)
+        unaffiliated_race, new = Race.objects.get_or_create(name="Unaffiliated", can_play=False)
 
-        self.player.race = others_race
+        self.player.race = unaffiliated_race
         self.player.save()
         self.assertFalse(god.user_is_eligible(self.player, ChallengeGame))
 
@@ -73,11 +78,11 @@ class GodTestCase(TestCase):
 
 
     @unittest.expectedFailure
-    def test_user_can_interact_with_others(self):
+    def test_user_can_interact_with_unaffiliated(self):
         user2 = User.objects.create(username='testgod2')
         player2 = user2.get_profile()
-        others, new = PlayerGroup.objects.get_or_create(name="Others", can_play=False)
-        others.players.add(player2)
+        unaffiliated, new = PlayerGroup.objects.get_or_create(name="Unaffiliated", can_play=False)
+        unaffiliated.players.add(player2)
 
         god = get_god()
 

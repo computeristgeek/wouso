@@ -1,0 +1,18 @@
+{% extends 'interface/section_base.html'%}
+
+{% load i18n %}
+
+{% block title %}{% trans 'Categories' %}{% endblock %}
+{% block sectiontitle %}{% trans 'Categories' %}{% endblock %}
+
+{% block sectioncontent %}
+
+    {% for c in categories %}
+    <ul>
+        <h3><a href="{% url lesson_category_view c.id %}">{{ c }}</a></h3>
+    </ul>
+    {% empty %}
+        {% trans 'No lessons have been added.' %}
+    {% endfor %}
+
+{% endblock %}

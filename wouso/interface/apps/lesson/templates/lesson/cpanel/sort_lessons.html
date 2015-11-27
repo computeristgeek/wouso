@@ -1,0 +1,56 @@
+{% extends 'lesson/cpanel/manage_tags.html' %}
+
+{% load i18n %}
+{% load django_bootstrap_breadcrumbs %}
+
+{% block scripts %}
+    <script type="text/javascript" src="{{ basepath }}/static/js/jquery-1.6.2.min.js"></script>
+    <script type="text/javascript" src="{{ basepath }}/static/js/jquery-ui-1.8.16.custom.min.js"></script>
+    <script type="text/javascript">
+        $(document).ready(function() {
+            $('#lessons-list').sortable({
+                handle: '.handle',
+                update: function() {
+                    var order = $('#lessons-list').sortable('serialize');
+                    $('#order-input').val(order);
+                }
+            });
+        });
+    </script>
+{% endblock %}
+
+{% block sectiontitle %}
+    Sort lessons
+    <div class="pull-right">
+        <a class="btn btn-primary" href="{% url add_lesson_tag %}">
+            <span class="glyphicon glyphicon-plus"></span>{% trans 'Add tag' %}
+        </a>
+    </div>
+{% endblock %}
+
+{% block breadcrumbs %}
+    {{ block.super }}
+    {% breadcrumb "Sort lessons" "sort_lessons" %}
+{% endblock %}
+
+{% block sectioncontent %}
+    <h3>{% trans 'Sort lessons in' %} {{ tag }} tag</h3>
+    <p>Drag and drop the bullets to reorder lessons:</p>
+
+    <form method="post">
+        <input id="order-input" name="order" value="" type="hidden" />
+        <ol id="lessons-list" class="sort-list">
+            {% for lesson in tag.get_lessons %}
+            <li id="listItem_{{lesson.id}}"><span class="handle">&bull;</span>{{lesson}}</li>
+            {% endfor %}
+        </ol>
+
+        <div class="actions">
+            <button onclick="history.back(); return false;" class="btn btn-warning">{% trans 'Cancel' %}</button>
+            <button onclick="window.location.reload(); return false;" class="btn btn-danger">{% trans 'Reset' %}</button>
+            <button type="submit" class="btn btn-primary">{% trans 'Save' %}</button>
+        </div>
+
+        {% csrf_token %}
+    </form>
+{% endblock %}

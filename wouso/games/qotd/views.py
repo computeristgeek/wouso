@@ -10,7 +10,9 @@ from models import QotdUser, QotdGame
 from forms import QotdForm
 from wouso.core.ui import register_sidebar_block
 
+
 class QotdView(View):
+
     def dispatch(self, request, *args, **kwargs):
         if QotdGame.disabled():
             return redirect('wouso.interface.views.homepage')
@@ -19,7 +21,8 @@ class QotdView(View):
         self.qotd_user = profile.get_extension(QotdUser)
 
         if self.qotd_user.magic.has_modifier('qotd-blind'):
-            messages.error(request, _("You have been blinded, you cannot answer to the Question of the Day"))
+            messages.error(request, _("You have been blinded, you cannot "
+                                      "answer to the Question of the Day"))
             return redirect('games.qotd.views.history')
         elif not self.qotd_user.has_question:
             self.qotd = QotdGame.get_for_today()
@@ -39,8 +42,8 @@ class QotdView(View):
         else:
             form = QotdForm(self.qotd)
         return render_to_response('qotd/index.html',
-                {'question': self.qotd, 'form': form},
-                context_instance=RequestContext(request))
+                                  {'question': self.qotd, 'form': form},
+                                  context_instance=RequestContext(request))
 
     def post(self, request, *args, **kwargs):
         if self.qotd is None:
@@ -53,10 +56,12 @@ class QotdView(View):
                 return redirect('games.qotd.views.done')
 
         return render_to_response('qotd/index.html',
-                {'question': self.qotd, 'form': form},
-                context_instance=RequestContext(request))
+                                  {'question': self.qotd, 'form': form},
+                                  context_instance=RequestContext(request))
+
 
 index = login_required(QotdView.as_view())
+
 
 @login_required
 def done(request):
@@ -82,19 +87,27 @@ def done(request):
         valid = False
 
     return render_to_response('qotd/done.html',
-            {'question': qotd, 'choice': ans, 'valid': valid,},
-            context_instance=RequestContext(request))
+                              {'question': qotd,
+                               'choice': ans,
+                               'valid': valid},
+                              context_instance=RequestContext(request))
 
 
 @login_required
 def history(request):
-    return render_to_response('qotd/history.html', {'history': QotdGame.get_history()}, context_instance=RequestContext(request))
+    return render_to_response(
+        'qotd/history.html',
+        {'history': QotdGame.get_history()},
+        context_instance=RequestContext(request))
 
 
 def sidebar_widget(context):
     # TODO: nothing should happen in the sidebar_widget
     user = context.get('user', None)
     if not user or not user.is_authenticated():
+        return ''
+
+    if QotdGame.disabled():
         return ''
     qotd = QotdGame.get_for_today()
     qotd_user = user.get_profile().get_extension(QotdUser)
@@ -107,8 +120,13 @@ def sidebar_widget(context):
     if qotd_user.has_answered:
         time_passed = datetime.now() - qotd_user.last_answered
         qotd_user.reset_question()
-        if time_passed > timedelta(seconds=120): # two minutes
+        if time_passed > timedelta(seconds=120):  # two minutes
             return ''
-    return render_to_string('qotd/sidebar.html', {'question': qotd, 'quser': qotd_user, 'qotd': QotdGame, 'id': 'qotd'})
+    return render_to_string('qotd/sidebar.html',
+                            {'question': qotd,
+                             'quser': qotd_user,
+                             'qotd': QotdGame,
+                             'id': 'qotd'})
+
 
 register_sidebar_block('qotd', sidebar_widget)

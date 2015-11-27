@@ -42,7 +42,9 @@ button {
 </table>
 
 {% load url from future %}
+{% ifequal config_login "True" %}
 <a href="{% url 'social:begin' "clef" %}">Log in with your Phone</a>
+{% endifequal %}
 
 <input type="hidden" name="next" value="{{ next }}" />
 {% csrf_token %}

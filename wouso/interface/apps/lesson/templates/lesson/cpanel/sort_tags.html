@@ -1,0 +1,56 @@
+{% extends 'lesson/cpanel/manage_categories.html' %}
+
+{% load i18n %}
+{% load django_bootstrap_breadcrumbs %}
+
+{% block scripts %}
+    <script type="text/javascript" src="{{ basepath }}/static/js/jquery-1.6.2.min.js"></script>
+    <script type="text/javascript" src="{{ basepath }}/static/js/jquery-ui-1.8.16.custom.min.js"></script>
+    <script type="text/javascript">
+        $(document).ready(function() {
+            $('#tags-list').sortable({
+                handle: '.handle',
+                update: function() {
+                    var order = $('#tags-list').sortable('serialize');
+                    $('#order-input').val(order);
+                }
+            });
+        });
+    </script>
+{% endblock %}
+
+{% block sectiontitle %}
+    Sort tags
+    <div class="pull-right">
+        <a class="btn btn-primary" href="{% url add_lesson_category %}">
+            <span class="glyphicon glyphicon-plus"></span>{% trans 'Add category' %}
+        </a>
+    </div>
+{% endblock %}
+
+{% block breadcrumbs %}
+    {{ block.super }}
+    {% breadcrumb "Sort tags" "sort_lesson_tags" %}
+{% endblock %}
+
+{% block sectioncontent %}
+    <h3>{% trans 'Sort tags in' %} {{ category }} category</h3>
+    <p>Drag and drop the bullets to reorder tags:</p>
+
+    <form method="post">
+        <input id="order-input" name="order" value="" type="hidden" />
+        <ol id="tags-list" class="sort-list">
+            {% for tag in category.get_tags %}
+            <li id="listItem_{{tag.id}}"><span class="handle">&bull;</span>{{tag}}</li>
+            {% endfor %}
+        </ol>
+
+        <div class="actions">
+            <button onclick="history.back(); return false;" class="btn btn-warning">{% trans 'Cancel' %}</button>
+            <button onclick="window.location.reload(); return false;" class="btn btn-danger">{% trans 'Reset' %}</button>
+            <button type="submit" class="btn btn-primary">{% trans 'Save' %}</button>
+        </div>
+
+        {% csrf_token %}
+    </form>
+{% endblock %}

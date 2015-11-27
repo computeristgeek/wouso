@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator, EmptyPage, InvalidPage
 from django.core.urlresolvers import reverse, reverse_lazy
+from django.db.models import Q
 from django.http import HttpResponseRedirect, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render_to_response
 from django.template import RequestContext
@@ -17,7 +18,7 @@ from django.utils.translation import ugettext_noop
 from django.utils.translation import ugettext as _
 from django.views.generic import UpdateView, CreateView, ListView, FormView, \
     TemplateView, DetailView
-from wouso.core.config.models import Setting
+from wouso.core.config.models import Setting, IntegerSetting, IntegerListSetting
 from wouso.core.decorators import staff_required
 from wouso.core.ui import get_sidebar
 from wouso.core.user.models import Player, PlayerGroup, Race
@@ -35,13 +36,14 @@ from wouso.interface.apps.messaging.models import Message
 from wouso.interface.apps.pages.models import StaticPage, NewsItem
 from wouso.interface.cpanel.models import Customization, Switchboard, \
     GamesSwitchboard
+from wouso.interface.forms import InstantSearchForm
 from wouso.interface.apps.qproposal import QUEST_GOLD, CHALLENGE_GOLD, QOTD_GOLD
 from wouso.middleware.impersonation import ImpersonateMiddleware
 from wouso.utils.import_questions import import_from_file
-from forms import QuestionForm, TagsForm, UserForm, SpellForm, AddTagForm, \
-    AnswerForm, EditReportForm, RaceForm, PlayerGroupForm, RoleForm, \
-    StaticPageForm, NewsForm, KarmaBonusForm
-from forms import FormulaForm, TagForm
+from forms import TagsForm, UserForm, SpellForm, AddTagForm,\
+    EditReportForm, RaceForm, PlayerGroupForm, RoleForm, \
+    StaticPageForm, NewsForm, KarmaBonusForm, AddQuestionForm, EditQuestionForm, \
+    FormulaForm, TagForm, ChangePasswordForm, AddUserForm
 
 
 class StatusView(TemplateView):
@@ -212,19 +214,21 @@ leaderboards = permission_required('config.change_setting')(
 
 
 class CustomizationView(TemplateView):
-    template_name = 'cpanel/customization.html'
+    template_name = 'cpanel/customization/customization.html'
 
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_superuser:
             return redirect('status')
+
         self.customization = Customization()
+
         return super(CustomizationView, self).dispatch(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         for s in self.customization.props():
             val = request.POST.get(s.name, '')
             s.set_value(val)
-        return redirect('customization')
+        return redirect('customization_home')
 
     def get_context_data(self, **kwargs):
         context = super(CustomizationView, self).get_context_data(**kwargs)
@@ -233,12 +237,12 @@ class CustomizationView(TemplateView):
         return context
 
 
-customization = permission_required('config.change_setting')(
+customization_home = permission_required('config.change_setting')(
     CustomizationView.as_view())
 
 
 class DisplayView(TemplateView):
-    template_name = 'cpanel/display.html'
+    template_name = 'cpanel/customization/display.html'
 
     def get_context_data(self, **kwargs):
         s = get_sidebar()
@@ -250,25 +254,26 @@ class DisplayView(TemplateView):
         data = request.POST['display']
         blocks = ','.join([b.strip() for b in data.split(',') if b.strip()])
         Setting.get('sidebar-order').set_value(blocks)
-        return redirect('cpanel_display')
+        return redirect('customization_display')
 
 
-display = permission_required('config.change_setting')(DisplayView.as_view())
+customization_display = permission_required('config.change_setting')(
+    DisplayView.as_view())
 
 
 class GamesView(TemplateView):
-    template_name = 'cpanel/games_home.html'
+    template_name = 'cpanel/customization/games.html'
 
-    def dispatch(self, request, *args, **kwargs):
+    def __init__(self, **kwargs):
+        super(GamesView, self).__init__(**kwargs)
         self.switchboard = GamesSwitchboard()
-        return super(GamesView, self).dispatch(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        self.switchboard = GamesSwitchboard()
         for s in self.switchboard.props():
             val = request.POST.get(s.name, '')
             s.set_value(val)
-        return redirect('games_home')
+
+        return redirect('customization_games')
 
     def get_context_data(self, **kwargs):
         context = super(GamesView, self).get_context_data(**kwargs)
@@ -276,22 +281,23 @@ class GamesView(TemplateView):
         return context
 
 
-games = permission_required('config.change_setting')(GamesView.as_view())
+customization_games = permission_required('config.change_setting')(
+    GamesView.as_view())
 
 
 class FeaturesView(TemplateView):
-    template_name = 'cpanel/features.html'
+    template_name = 'cpanel/customization/features.html'
 
-    def dispatch(self, request, *args, **kwargs):
+    def __init__(self, **kwargs):
+        super(FeaturesView, self).__init__(**kwargs)
         self.switchboard = Switchboard()
-        return super(FeaturesView, self).dispatch(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
         for s in self.switchboard.props():
             val = request.POST.get(s.name, '')
             s.set_value(val)
 
-        return redirect('features')
+        return redirect('customization_features')
 
     def get_context_data(self, **kwargs):
         context = super(FeaturesView, self).get_context_data(**kwargs)
@@ -300,7 +306,37 @@ class FeaturesView(TemplateView):
         return context
 
 
-features = permission_required('config.change_setting')(FeaturesView.as_view())
+customization_features = permission_required('config.change_setting')(
+    FeaturesView.as_view())
+
+
+class CustomizationLevelsView(TemplateView):
+    template_name = 'cpanel/customization/levels.html'
+
+    def __init__(self, **kwargs):
+        super(CustomizationLevelsView, self).__init__(**kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super(CustomizationLevelsView, self).get_context_data(**kwargs)
+
+        level_limits = IntegerListSetting.get('level_limits').get_value()
+        context['maximum_level'] = 1 + len(level_limits)
+        context['level_limits'] = level_limits
+
+        return context
+
+customization_levels = permission_required('config.change_setting')(
+    CustomizationLevelsView.as_view())
+
+
+@permission_required('config.change_setting')
+def customization_set_levels(request):
+    new_level_limits = request.GET.get('new_level_limits', '')
+    IntegerListSetting.get('level_limits').set_value(new_level_limits)
+
+    redir = request.META.get('HTTP_REFERER', reverse('customization_levels'))
+
+    return redirect(redir)
 
 
 @permission_required('config.change_setting')
@@ -375,9 +411,9 @@ def qpool_home(request, cat='qotd', page=u'1', tag=None):
                               context_instance=RequestContext(request))
 
 
-class QPoolNewView(FormView):
-    template_name = 'cpanel/qpool_new.html'
-    form_class = QuestionForm
+class AddQuestionView(FormView):
+    form_class = AddQuestionForm
+    template_name = 'cpanel/add_question.html'
 
     def get_form_kwargs(self):
         return dict(data=self.request.POST)
@@ -387,73 +423,45 @@ class QPoolNewView(FormView):
         return redirect('qpool_home', cat=new_question.category.name)
 
     def get_context_data(self, **kwargs):
-        context = super(QPoolNewView, self).get_context_data(**kwargs)
-        categs = [(c.name.capitalize(), c.name) for c in Category.objects.all()]
-        context.update(dict(categs=categs))
+        context = super(AddQuestionView, self).get_context_data(**kwargs)
+        answers_range = [str(i) for i in range(1, IntegerSetting.get('question_number_of_answers').get_value() + 1)]
+        categories = [(c.name.capitalize(), c.name) for c in Category.objects.all()]
+        context['categories'] = categories
+        context['answers_range'] = answers_range
         return context
 
 
-qpool_new = permission_required('config.change_setting')(QPoolNewView.as_view())
-
-
-class QPoolAddAnswerView(UpdateView):
-    template_name = 'cpanel/add_answer.html'
-    model = Question
-    form_class = AnswerForm
-
-    def get_form_kwargs(self):
-        kwargs = {
-            'data': self.request.POST,
-            'instance': self.object
-        }
-        return kwargs
-
-    def form_valid(self, form):
-        form.save(id=self.object)
-        return redirect('question_edit', id=self.object.id)
-
-
-qpool_add_answer = permission_required('config.change_setting')(
-    QPoolAddAnswerView.as_view())
+add_question = permission_required('config.change_setting')(
+    AddQuestionView.as_view())
 
 
 @permission_required('config.change_setting')
-def qpool_edit(request, id):
+def edit_question(request, id):
     question = get_object_or_404(Question, pk=id)
-    categs = [(c.name.capitalize(), c.name) for c in Category.objects.all()]
+    categories = [(c.name.capitalize(), c.name) for c in Category.objects.all()]
+    answers_range = [str(i) for i in range(1, len(question.answers_all) + 1)]
 
     if request.method == 'POST':
-        form = QuestionForm(request.POST, instance=question)
+        form = EditQuestionForm(request.POST, instance=question)
         if form.is_valid():
-            newq = form.save()
-            newq.proposed_by = request.user
-            if newq.endorsed_by is None:
-                newq.endorsed_by = request.user
-                newq.save()
-            return redirect('qpool_home', cat=newq.category.name)
-        else:
-            print "nevalid"
+            new_question = form.save()
+            new_question.proposed_by = request.user
+            if new_question.endorsed_by is None:
+                new_question.endorsed_by = request.user
+                new_question.save()
+            return redirect('qpool_home', cat=new_question.category.name)
     else:
-        show_users = False
-        if question:
-            if question.category:
-                if question.category.name == 'proposed':
-                    show_users = True
+        form = EditQuestionForm(instance=question)
 
-        form = QuestionForm(instance=question)
-
-    return render_to_response('cpanel/qpool_edit.html',
-                              {'question': question,
-                               'form': form,
-                               'module': 'qpool',
-                               'categs': categs},
+    return render_to_response('cpanel/edit_question.html',
+                              {'question': question, 'form': form,
+                               'categories': categories, 'answers_range': answers_range},
                               context_instance=RequestContext(request))
 
 
 @permission_required('config.change_setting')
 def question_switch(request, id):
-    """ Accept a proposed question
-    """
+    """ Accept a proposed question """
     question = get_object_or_404(Question, pk=id)
 
     # qproposal - endorse part
@@ -517,15 +525,6 @@ def qpool_delete(request, id):
         go_back = reverse('wouso.interface.cpanel.views.qpool_home')
 
     return HttpResponseRedirect(go_back)
-
-
-@permission_required('config.change_setting')
-def qpool_delete_answer(request, question_id, answer_id):
-    answer = get_object_or_404(Answer, pk=answer_id)
-
-    answer.delete()
-
-    return redirect('question_edit', id=question_id)
 
 
 @permission_required('config.change_setting')
@@ -918,7 +917,7 @@ players = permission_required('config.change_setting')(PlayersView.as_view())
 
 class AddPlayerView(CreateView):
     template_name = 'cpanel/add_player.html'
-    form_class = UserForm
+    form_class = AddUserForm
     success_url = reverse_lazy('all_players')
 
     def form_valid(self, form):
@@ -936,15 +935,20 @@ class ManagePlayerView(UpdateView):
     form_class = UserForm
     success_url = reverse_lazy('all_players')
 
-    def get_form(self, form_class):
-        form = form_class(**self.get_form_kwargs())
-        form.fields['password'].required = False
-        form.fields['confirm_password'].required = False
-        return form
-
 
 manage_player = permission_required('config.change_setting')(
     ManagePlayerView.as_view())
+
+
+class ChangePasswordView(UpdateView):
+    template_name = 'cpanel/change_password.html'
+    model = User
+    form_class = ChangePasswordForm
+    success_url = reverse_lazy('all_players')
+
+
+change_password = permission_required('config.change_setting')(
+    ChangePasswordView.as_view())
 
 
 @staff_required
@@ -1025,6 +1029,15 @@ class RacesAdd(CreateView):
         return reverse('races_groups')
 
 
+class RacesEdit(UpdateView):
+    model = Race
+    template_name = 'cpanel/races/edit_race.html'
+    form_class = RaceForm
+
+    def get_success_url(self):
+        return reverse('races_groups')
+
+
 class GroupsAdd(CreateView):
     model = PlayerGroup
     template_name = 'cpanel/races/group_create.html'
@@ -1033,6 +1046,12 @@ class GroupsAdd(CreateView):
     def get_success_url(self):
         return reverse('races_groups')
 
+class GroupsEdit(CreateView):
+    model = PlayerGroup
+    template_name = 'cpanel/races/group_edit.html'
+    form_class = PlayerGroupForm
+    def get_success_url(self):
+        return reverse('races_groups')
 
 races_groups = permission_required('config.change_setting')(
     RacesGroupsView.as_view()
@@ -1043,7 +1062,13 @@ races_add = permission_required('config.change_setting')(
 group_add = permission_required('config.change_setting')(
     GroupsAdd.as_view()
 )
+races_edit = permission_required('config.change_setting')(
+    RacesEdit.as_view()
+)
 
+group_edit = permission_required('config.change_setting')(
+    GroupsEdit.as_view()
+)
 
 class RolesView(ListView):
     template_name = 'cpanel/roles.html'
@@ -1115,6 +1140,7 @@ edit_report = staff_required(EditReportView.as_view())
 class ActivityMonitorView(ListView):
     template_name = 'cpanel/activity_monitor.html'
     model = Activity
+    paginate_by = 50
 
     def get_queryset(self):
         objects = self.model.objects.all()
@@ -1310,11 +1336,24 @@ def bonus(request, player_id):
                               context_instance=RequestContext(request))
 
 
-def fwd(request):
-    if request.method == 'POST':
-        player = get_object_or_404(Player, pk=request.POST.get('player'))
-        return redirect('manage_player', pk=player.pk)
-    return redirect('all_players')
+def instant_search(request):
+    """ Perform instant search """
+    form = InstantSearchForm(request.GET)
+    if form.is_valid():
+        query = form.cleaned_data['q']
+        users = User.objects.filter(Q(first_name__icontains=query) |
+                                    Q(last_name__icontains=query) |
+                                    Q(username__icontains=query))
+        user_ids = [u.id for u in users]
+        searchresults = Player.objects.filter(Q(user__in=user_ids) |
+                                              Q(full_name__icontains=query) |
+                                              Q(nickname__icontains=query))
+        return render_to_response('interface/instant_search_results.txt',
+                                  {'searchresults': searchresults},
+                                  context_instance=RequestContext(request))
+
+    else:
+        return HttpResponse('')
 
 
 @permission_required('config.change_setting')

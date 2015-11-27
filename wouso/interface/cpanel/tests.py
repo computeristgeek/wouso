@@ -1,3 +1,4 @@
+from django.core.cache import cache
 import unittest
 from datetime import datetime
 from django.contrib.auth.models import User, Group, Permission
@@ -24,7 +25,6 @@ class addPlayerTestCase(TestCase):
         old_number = len(User.objects.all())
         self.client = Client()
         self.client.login(username='_test1', password='secret')
-        User.objects.get(pk=1).is_staff
 
         data = {'username': '_test2', 'password': 'secret', 'confirm_password': 'secret'}
         resp = self.client.post(reverse('add_player'), data)
@@ -278,23 +278,46 @@ class CpanelViewsTest(WousoTest):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'testuser1')
         self.assertContains(response, 'Username')
-        self.assertContains(response, 'Password')
 
     def test_manage_player_view_post(self):
         p1 = self._get_player(1)
 
         # Check the view with a valid form
-        data = {'username': 'testuser_updated', 'password': p1.user.password, 'confirm_password': p1.user.password}
+        data = {'username': 'testuser_updated', 'first_name': 'testuser_name'}
         response = self.client.post(reverse('manage_player', args=[p1.pk]), data)
         self.assertEqual(response.status_code, 302)
         p1 = User.objects.get(pk=p1.pk)
         self.assertEqual(p1.username, 'testuser_updated')
+        self.assertEqual(p1.first_name, 'testuser_name')
 
         # Check the view with an invalid form
         data = {}
         response = self.client.post(reverse('manage_player', args=[p1.pk]), data)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'This field is required')
+
+    def test_change_password_view_get(self):
+        p1 = self._get_player(1)
+        response = self.client.get(reverse('change_password', args=[p1.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Password')
+        self.assertContains(response, 'Confirm password')
+
+    def test_change_password_view_post(self):
+        p1 = self._get_player(1)
+
+        # Check the view with a valid form
+        data = {'password': 'secret', 'confirm_password': 'secret'}
+        response = self.client.post(reverse('change_password', args=[p1.pk]), data)
+        p1 = self._get_player(1)
+        self.assertTrue(p1.user.check_password('secret'))
+
+         # Check the view with an invalid form
+        data = {'password': 'test'}
+        response = self.client.post(reverse('change_password', args=[p1.pk]), data)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'This field is required')
+
 
     def test_races_groups_view(self):
         """ Test adds races and groups and verifies the
@@ -380,30 +403,30 @@ class CpanelViewsTest(WousoTest):
         self.assertNotContains(response, 'Message sent!')
 
     def test_customization_view_get(self):
-        response = self.client.get(reverse('customization'))
+        response = self.client.get(reverse('customization_home'))
         self.assertContains(response, 'Customization', status_code=200)
-        self.assertContains(response, 'Disable features', status_code=200)
-        self.assertContains(response, 'Disable games', status_code=200)
+        self.assertContains(response, 'Features', status_code=200)
+        self.assertContains(response, 'Games', status_code=200)
         self.assertContains(response, 'Display', status_code=200)
 
     def test_customization_view_post(self):
         data = {'title': 'Custom test title'}
 
         # POST data
-        response = self.client.post(reverse('customization'), data)
+        response = self.client.post(reverse('customization_home'), data)
 
         # Check if data has been updated
-        response = self.client.get(reverse('customization'))
+        response = self.client.get(reverse('customization_home'))
         self.assertContains(response, 'Custom test title', status_code=200)
 
     def test_games_view_get(self):
-        response = self.client.get(reverse('games_home'))
-        self.assertContains(response, 'Disable games', status_code=200)
+        response = self.client.get(reverse('customization_games'))
+        self.assertContains(response, 'Games', status_code=200)
 
     def test_games_view_post(self):
         data = {'disable-WorkshopGame': 'True'}
-        response = self.client.post(reverse('games_home'), data)
-        response = self.client.get(reverse('games_home'))
+        response = self.client.post(reverse('customization_games'), data)
+        response = self.client.get(reverse('customization_games'))
         self.assertContains(response, 'id="disable-WorkshopGame" checked')
 
     @unittest.skip  # TODO fixme
@@ -413,40 +436,36 @@ class CpanelViewsTest(WousoTest):
         self.assertContains(response, 'Select input file', status_code=200)
         self.assertTrue(chall_cat in response.context['categories'])
 
-    def test_qpool_add_answer_view_get(self):
-        q1 = Question.objects.create(text='Question 1')
-        a1 = Answer.objects.create(text='Answer 1', question=q1, correct=True)
-        a2 = Answer.objects.create(text='Answer 2', question=q1, correct=False)
-        response = self.client.get(reverse('add_answer', args=[q1.pk]))
-        self.assertContains(response, 'Question 1', status_code=200)
-        self.assertContains(response, 'Answer 1')
-        self.assertContains(response, 'Answer 2')
-
-    def test_qpool_add_answer_view_post(self):
-        q1 = Question.objects.create(text='Question 1')
-        data = {'new_answer_text': 'First Answer',
-                'new_answer_correct': 'on'}
-        self.client.post(reverse('add_answer', args=[q1.pk]), data)
-        response = self.client.get(reverse('add_answer', args=[q1.pk]))
-        self.assertContains(response, 'First Answer')
-
     def test_qpool_new_view_get(self):
         Category.objects.create(name='sample_category')
-        response = self.client.get(reverse('question_new'))
+        response = self.client.get(reverse('add_question'))
         self.assertContains(response, 'Add question', status_code=200)
         self.assertContains(response, 'Insert question text')
         self.assertContains(response, 'Select category')
         self.assertContains(response, 'sample_category')
 
     def test_qpool_new_category_ok(self):
+        # Test question with normal text
         Category.objects.create(name='sample_category')
         data = {'text': 'sample text for test question',
                 'category': 'sample_category',
-                'answertype': 'R',
+                'answer_type': 'R',
                 'answer_1': 'sample answer',
-                'correct_1': 'on'}
-        response = self.client.post(reverse('question_new'), data)
+                'correct_1': 'on',
+                'active_1': 'on'}
+        response = self.client.post(reverse('add_question'), data)
         self.assertTrue(Question.objects.get(category__name='sample_category'))
+
+        # Test question with rich text
+        Category.objects.create(name='sample_category_2')
+        data = {'rich_text': '<p><b>sample rich text</b></p>',
+                'category': 'sample_category_2',
+                'answer_type': 'R',
+                'rich_answer_1': '<i>sample_answer</i>',
+                'rich_correct_1': 'on',
+                'rich_active_1': 'on'}
+        response = self.client.post(reverse('add_question'), data)
+        self.assertTrue(Question.objects.get(category__name='sample_category_2'))
 
     @unittest.skip
     # FIXME: If not entering all fields the question home page should add
@@ -455,20 +474,33 @@ class CpanelViewsTest(WousoTest):
         Category.objects.create(name='sample_category')
         data = {'text': 'sample text for test question',
                 'category': 'sample_category',
-                'answertype': 'R'}
+                'answer_type': 'R'}
         response = self.client.post(reverse('question_new'), data)
         response = self.client.get(reverse('qpool_home'))
         self.assertContains(response, 'Invalid')
 
-    def test_qpool_new_answer_ok(self):
+    def test_qpool_new_question_ok(self):
         Category.objects.create(name='sample_category')
+
+        # Test question with normal text
         data = {'text': 'sample text for test question',
                 'category': 'sample_category',
-                'answertype': 'R',
+                'answer_type': 'R',
                 'answer_1': 'sample_response',
-                'correct_1': 'on'}
-        response = self.client.post(reverse('question_new'), data)
+                'correct_1': 'on',
+                'active_1': 'on'}
+        response = self.client.post(reverse('add_question'), data)
         self.assertTrue(Question.objects.get(text='sample text for test question'))
+
+        # Test question with rich text
+        data = {'rich_text': '<p><b>sample rich text</b></p>',
+                'category': 'sample_category',
+                'answer_type': 'R',
+                'rich_answer_1': '<i>sample_answer</i>',
+                'rich_correct_1': 'on',
+                'rich_active_1': 'on'}
+        response = self.client.post(reverse('add_question'), data)
+        self.assertTrue(Question.objects.get(rich_text='<p><b>sample rich text</b></p>'))
 
     def test_status_view(self):
         # Create dummy objects

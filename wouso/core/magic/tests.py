@@ -106,27 +106,6 @@ class ArtifactTestCase(TestCase):
 
 
 class SpellTestCase(WousoTest):
-
-    def test_buy_spell(self):
-        Coin.add('gold')
-        Formula.add('buy-spell', expression="gold=-{price}")
-        spell = Spell.objects.create(name='test-spell', available=True, price=10)
-        player = User.objects.create_user('test', 'test@a.ro', password='test').get_profile()
-
-        scoring.score_simple(player, 'gold', 100)
-        self.assertEqual(player.coins['gold'], 100)
-
-        # TODO: interface test should not be here
-        response = self.client.get(reverse('bazaar_home'))
-        self.assertTrue('test-spell' in response.content)
-
-        self.client.login(username='test', password='test')
-        response = self.client.get(reverse('bazaar_buy', kwargs={'spell': spell.id}))
-        self.assertFalse('error' in response.content)
-
-        player = Player.objects.get(user__username='test')
-        self.assertEqual(player.coins['gold'], 90)
-
     def test_expired(self):
         player = self._get_player()
         spell = Spell.objects.create(name='test-spell', available=True, price=10)
@@ -167,23 +146,47 @@ class SpellTestCase(WousoTest):
         player.magic.cast_spell(dispell, player, datetime.now())
         self.assertFalse(player.magic.spells) # No spells should be active on player after dispell
 
-    def test_cure(self):
+    def test_dispell_no_due(self):
         """
-         Test if cure works on a player
+         Dispell should not remain active on player after cast
         """
         player = self._get_player()
-        player2 = self._get_player(2)
+
+        dispell = Spell.objects.create(name='dispell', available=True, price=20, type='o')
+        player.magic.add_spell(dispell)
+
+        player.magic.cast_spell(dispell, player)
+        self.assertFalse(PlayerSpellDue.objects.filter(player=player))
+
+    def test_cure_negative(self):
+        """
+         Test if cure works on a negative spell
+        """
+        player = self._get_player()
 
         spell = Spell.objects.create(name='test-spell', available=True, price=10, type='n')
         cure = Spell.objects.create(name='cure', available=True, price=10)
         obs = PlayerSpellDue.objects.create(player=player, source=player, spell=spell, due=datetime.now() + timedelta(days=1))
 
-        self.assertTrue(player.magic.spells) # There is test-spell cast on myself
+        player.magic.add_spell(cure)
+        player.magic.cast_spell(cure, player, datetime.now() + timedelta(days=1))
 
-        player2.magic.add_spell(cure)
-        player.magic.cast_spell(cure, player2, datetime.now() + timedelta(days=1))
+        self.assertFalse(PlayerSpellDue.objects.filter(player=player)) # There isn't any spell left
 
-        self.assertFalse(player.magic.spells) # There isn't any spell left
+    def test_cure_positive(self):
+        """
+         Cure should not remove positive spells
+        """
+        player = self._get_player()
+
+        spell = Spell.objects.create(name='test-spell', available=True, price=10, type='p')
+        cure = Spell.objects.create(name='cure', available=True, price=10)
+        obs = PlayerSpellDue.objects.create(player=player, source=player, spell=spell, due=datetime.now() + timedelta(days=1))
+
+        player.magic.add_spell(cure)
+        player.magic.cast_spell(cure, player, datetime.now() + timedelta(days=1))
+
+        self.assertTrue(PlayerSpellDue.objects.filter(player=player)) # The spell is still present
 
     def test_disguise_simple(self):
         """
@@ -246,6 +249,7 @@ class SpellTestCase(WousoTest):
         # Player should not be able to launch challenge with Paralyze on
         self.assertFalse(chall_user.can_launch())
 
+    @unittest.skip
     def test_evade(self):
         """
          Test for Evade spell
@@ -287,70 +291,166 @@ class SpellTestCase(WousoTest):
         # Check if final score is ok
         self.assertEqual(player.points, initial_points + points)
 
-    def test_weakness(self):
+    def test_frenzy_win(self):
         """
-         Test for weakness
+         If user wins while affected by frenzy he should win frenzy.percents more points
         """
+        initial_points = 100
+        win_points = 10
 
-        initial_points = 10
-
-        player = self._get_player()
-        player2 = self._get_player(2)
-        chall_user = player.get_extension(ChallengeUser)
+        player_frenzy = self._get_player(1).get_extension(ChallengeUser)
+        player_dummy = self._get_player(2).get_extension(ChallengeUser)
 
         scoring.setup_scoring()
         Coin.add('points')
-        scoring.score_simple(chall_user, 'points', initial_points)
-        self.assertEqual(player.points, initial_points)
+        scoring.score_simple(player_frenzy, 'points', initial_points)
 
-        # Points won before Weakness is applied
-        chall = Challenge.create(user_from=chall_user, user_to=player2, ignore_questions=True)
-        chall.set_won_by_player(chall_user)
-        points_no_weakness = player.points
+        formula = Formula.get('chall-won')
+        formula.expression = 'points=' + str(win_points)
+        formula.save()
 
-        # Applying Weakness
-        weakness = Spell.objects.create(name='challenge-affect-scoring', available=True, price=10, percents=-66, type='n')
-        obs = PlayerSpellDue.objects.create(player=chall_user, source=chall_user, spell=weakness, due=datetime.now() + timedelta(days=1))
-        self.assertTrue(chall_user.magic.has_modifier('challenge-affect-scoring'))
+        # Apply frenzy
+        frenzy = Spell.objects.create(name='challenge-affect-scoring', available=True, price=25, percents=66, type='o')
+        obs = PlayerSpellDue.objects.create(player=player_frenzy, source=player_frenzy, spell=frenzy, due=datetime.now() + timedelta(days=1))
 
-        player.points = initial_points
-        chall = Challenge.create(user_from=chall_user, user_to=player2, ignore_questions=True)
-        chall.set_won_by_player(chall_user)
+        # Win challenge
+        chall = Challenge.create(user_from=player_frenzy, user_to=player_dummy, ignore_questions=True)
+        chall.set_won_by_player(player_frenzy)
 
-        # Player should win 66% less points with weakness applied
-        self.assertEqual(player.points, points_no_weakness - 0.66 * (points_no_weakness - initial_points))
+        # Player should win frenzy.percents more points with frenzy applied
+        target_points = initial_points + win_points + frenzy.percents / 100.0 * win_points
+
+        self.assertEqual(player_frenzy.player_ptr.points, target_points)
+
+    def test_frenzy_loss(self):
+        """
+         If user loses while affected by frenzy he should lose frenzy.percents more points
+        """
+        initial_points = 100
+        loss_points = -10
+        warranty_points = -3
+
+        player_frenzy = self._get_player(1).get_extension(ChallengeUser)
+        player_dummy = self._get_player(2).get_extension(ChallengeUser)
+
+        scoring.setup_scoring()
+        Coin.add('points')
+        scoring.score_simple(player_frenzy, 'points', initial_points)
+
+        formula = Formula.get('chall-lost')
+        formula.expression = 'points=' + str(loss_points)
+        formula.save()
+
+        formula = Formula.get('chall-warranty')
+        formula.expression = 'points=' + str(warranty_points)
+        formula.save()
+
+        # Apply frenzy
+        frenzy = Spell.objects.create(name='challenge-affect-scoring', available=True, price=25, percents=66, type='o')
+        obs = PlayerSpellDue.objects.create(player=player_frenzy, source=player_frenzy, spell=frenzy, due=datetime.now() + timedelta(days=1))
+
+        # Win challenge with dummy player to see the amount of points lost by the player affected with frenzy
+        chall = Challenge.create(user_from=player_frenzy, user_to=player_dummy, ignore_questions=True)
+        chall.set_won_by_player(player_dummy)
+
+        # Player should lose frenzy.percents more points with frenzy applied
+        target_points = initial_points + loss_points + frenzy.percents / 100.0 * loss_points + warranty_points
+
+        self.assertEqual(player_frenzy.player_ptr.points, target_points)
+
+    def test_weakness(self):
+        """
+         Test for Weakness spell
+        """
+        initial_points = 100
+        win_points = 10
+
+        player_weakness = self._get_player(1).get_extension(ChallengeUser)
+        player_dummy = self._get_player(2).get_extension(ChallengeUser)
+
+        scoring.setup_scoring()
+        Coin.add('points')
+        scoring.score_simple(player_weakness, 'points', initial_points)
+
+        formula = Formula.get('chall-won')
+        formula.expression = 'points=' + str(win_points)
+        formula.save()
+
+        # Apply weakness
+        weakness = Spell.objects.create(name='challenge-affect-scoring-lost', available=True, price=10, percents=-66, type='n')
+        obs = PlayerSpellDue.objects.create(player=player_weakness, source=player_weakness, spell=weakness, due=datetime.now() + timedelta(days=1))
+
+        # Win challenge with player_weakness
+        chall = Challenge.create(user_from=player_weakness, user_to=player_dummy, ignore_questions=True)
+        chall.set_won_by_player(player_weakness)
+
+        # Player should win weakness.percents less points with weakness applied
+        target_points = initial_points + win_points + weakness.percents / 100.0 * win_points
+        self.assertEqual(player_weakness.player_ptr.points, target_points)
 
     def test_charge(self):
         """
          Test for Charge spell
         """
-        initial_points = 10
+        initial_points = 100
+        win_points = 10
 
-        player = self._get_player()
-        player2 = self._get_player(2)
-        chall_user = player.get_extension(ChallengeUser)
+        player_charge = self._get_player(1).get_extension(ChallengeUser)
+        player_dummy = self._get_player(2).get_extension(ChallengeUser)
 
         scoring.setup_scoring()
         Coin.add('points')
-        scoring.score_simple(chall_user, 'points', initial_points)
-        self.assertEqual(player.points, initial_points)
+        scoring.score_simple(player_charge, 'points', initial_points)
 
-        # Points won before Charge is applied
-        chall = Challenge.create(user_from=chall_user, user_to=player2, ignore_questions=True)
-        chall.set_won_by_player(chall_user)
-        points_no_charge = player.points
+        formula = Formula.get('chall-won')
+        formula.expression = 'points=' + str(win_points)
+        formula.save()
 
-        # Apply Charge
-        charge = Spell.objects.create(name='challenge-affect-scoring', available=True, price=10, percents=33, type='p')
-        obs = PlayerSpellDue.objects.create(player=chall_user, source=chall_user, spell=charge, due=datetime.now() + timedelta(days=1))
-        self.assertTrue(chall_user.magic.has_modifier('challenge-affect-scoring'))
+        # Apply charge
+        charge = Spell.objects.create(name='challenge-affect-scoring-won', available=True, price=10, percents=33, type='p')
+        obs = PlayerSpellDue.objects.create(player=player_charge, source=player_charge, spell=charge, due=datetime.now() + timedelta(days=1))
 
-        player.points = initial_points
-        chall = Challenge.create(user_from=chall_user, user_to=player2, ignore_questions=True)
-        chall.set_won_by_player(chall_user)
+        chall = Challenge.create(user_from=player_charge, user_to=player_dummy, ignore_questions=True)
+        chall.set_won_by_player(player_charge)
 
-        # Player should have 33% more points with charge applied
-        self.assertEqual(player.points, points_no_charge + 0.33 * (points_no_charge - initial_points))
+        # Player should win weakness.percents more points with charge applied
+        target_points = initial_points + win_points + charge.percents / 100.0 * win_points
+        self.assertEqual(player_charge.player_ptr.points, target_points)
+
+    def test_weakness_and_charge(self):
+        """
+         If both Weakness and Charge are active, a player should win weakness.percents + charge.percents less/more points
+         after winning a challenge
+        """
+        initial_points = 100
+        win_points = 10
+
+        player = self._get_player(1).get_extension(ChallengeUser)
+        player_dummy = self._get_player(2).get_extension(ChallengeUser)
+
+        scoring.setup_scoring()
+        Coin.add('points')
+        scoring.score_simple(player, 'points', initial_points)
+
+        formula = Formula.get('chall-won')
+        formula.expression = 'points=' + str(win_points)
+        formula.save()
+
+        # Apply charge
+        charge = Spell.objects.create(name='challenge-affect-scoring-won', available=True, price=10, percents=33, type='p')
+        obs = PlayerSpellDue.objects.create(player=player, source=player, spell=charge, due=datetime.now() + timedelta(days=1))
+
+        # Apply weakness
+        weakness = Spell.objects.create(name='challenge-affect-scoring-won', available=True, price=10, percents=-66, type='p')
+        obs = PlayerSpellDue.objects.create(player=player, source=player, spell=weakness, due=datetime.now() + timedelta(days=1))
+
+        chall = Challenge.create(user_from=player, user_to=player_dummy, ignore_questions=True)
+        chall.set_won_by_player(player)
+
+        percents = (charge.percents + weakness.percents) / 100.0
+        target_points = initial_points + win_points + percents * win_points
+
+        self.assertEqual(player.player_ptr.points, target_points)
 
     def test_blind(self):
         """
@@ -408,6 +508,24 @@ class TestMagicViews(WousoTest):
         self.activity = Activity.objects.create(user_from=self.p1, user_to=self.p2,
                                                 action='gold-won')
         scoring.setup_scoring()
+    def test_buy_spell(self):
+         Coin.add('gold')
+         Formula.add('buy-spell', expression="gold=-{price}")
+         spell = Spell.objects.create(name='test-spell', available=True, price=10)
+         player = User.objects.create_user('test', 'test@a.ro', password='test').get_profile()
+
+         scoring.score_simple(player, 'gold', 100)
+         self.assertEqual(player.coins['gold'], 100)
+
+         response = self.client.get(reverse('bazaar_home'))
+         self.assertTrue('test-spell' in response.content)
+
+         self.client.login(username='test', password='test')
+         response = self.client.get(reverse('bazaar_buy', kwargs={'spell': spell.id}))
+         self.assertFalse('error' in response.content)
+
+         player = Player.objects.get(user__username='test')
+         self.assertEqual(player.coins['gold'], 90)
 
     def test_bazaar_view(self):
         response = self.c.get(reverse('bazaar_home'))
@@ -424,7 +542,7 @@ class TestMagicViews(WousoTest):
         data = {'points': 10}
         response = self.c.post(reverse('bazaar_exchange'), data)
         self.assertContains(response, _('Converted successfully'))
-        
+
     def test_bazaar_exchange_error_message(self):
         data = {'points': 1000}
         response = self.c.post(reverse('bazaar_exchange'), data)
@@ -433,7 +551,7 @@ class TestMagicViews(WousoTest):
         self.assertContains(response, _('Expected post'))
 
     def test_magic_cast_error_message(self):
-        data = {'days': 10, 'spell': 1}
+        data = {'days': 10, 'spell': self.spell_1.id}
         self.p1.magic.add_spell(self.spell_1)
-        response = self.c.post(reverse('magic_cast', args=[2]), data)
+        response = self.c.post(reverse('magic_cast', args=[self.p2.id]), data)
         self.assertContains(response, _('Invalid number of days'))

@@ -15,6 +15,7 @@ class Setting(models.Model):
         """ value setter, overridden by subclasses """
         self.value = v
         self.save()
+
     def get_value(self):
         """ value getter, overridden by subclasses """
         return self.value
@@ -51,21 +52,26 @@ class Setting(models.Model):
         cache.delete(cache_key)
         return super(Setting, self).save(**kwargs)
 
-
     @property
     def title(self):
         """ Capitalize name to create a setting title for display """
         if self.name.startswith('disable-'):
-            return self.name[8:].capitalize()
+            # Remove 'disable-', capitalize, remove '-' and add a space before
+            # game
+            # Ex: challengegame -> Challenge game
+            return self.name[8:].capitalize().replace('game', ' game').replace('-', ' ')
+
         return self.name.capitalize().replace('_', ' ')
 
     def __unicode__(self):
         return self.name
 
+
 class HTMLSetting(Setting):
     """ Setting storing a generic text or HTML """
     class Meta:
         proxy = True
+
 
 class BoolSetting(Setting):
     """ Setting storing boolean values (as string True/False) """
@@ -76,7 +82,7 @@ class BoolSetting(Setting):
         if isinstance(b, bool):
             self.value = 'True' if b else 'False'
         else:
-            self.value = b
+            self.value = not b
         self.save()
 
     def get_value(self):
@@ -85,11 +91,16 @@ class BoolSetting(Setting):
     def form(self):
         return """
         <div class="form-group">
-            <label for="%s" class="col-sm-2 control-label">%s</label>
-            <div class="col-sm-1">
-                <input type="checkbox" name="%s" id="%s" %s value="True" class="form-control"/>
+            <label for"%s" class="col-sm-2 control-label">%s<span class="help-block">%s</span></label>
+            <div class="col-sm-10">
+                <div class="checkbox">
+                    <input type="checkbox" name="%s" id="%s" %s value="True"></input>
+                </div>
             </div>
-        </div>""" % (self.name, self.title, self.name, self.name, 'checked' if self.get_value() else '')
+        </div>
+        """ % (self.name, self.title, self.help_text if hasattr(self, 'help_text') else '',
+               self.name, self.name, '' if self.get_value() else 'checked')
+
 
 class ChoicesSetting(Setting):
     """ Setting storing string values, but having a choices list of tuple
@@ -109,7 +120,7 @@ class ChoicesSetting(Setting):
                 <select id="%s" name="%s" class="form-control">
         """ % (self.name, self.title, self.name, self.name)
 
-        for n,v in self.choices:
+        for n, v in self.choices:
             html += '<option value="%s" %s>%s</option>' % (v, 'selected' if self.value == v else '', n)
         html += '</select></div></div>'
         return html
@@ -125,3 +136,23 @@ class IntegerSetting(Setting):
             return int(self.value)
         except ValueError:
             return 0
+
+
+class IntegerListSetting(Setting):
+    """ Setting storing integer values as strings """
+
+    def set_value(self, v):
+        self.value = unicode(v)
+        self.save()
+
+    def get_value(self):
+        l = []
+        for n in self.value.split():
+            try:
+                l.append(int(n))
+            except ValueError:
+                l.append(0)
+        return l
+
+    def form(self):
+        return ''

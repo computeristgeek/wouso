@@ -11,8 +11,9 @@ from wouso.core.tests import WousoTest
 from wouso.games.challenge.models import ChallengeUser, Challenge, ChallengeGame
 from wouso.core.user.models import Player, Race
 from wouso.core import scoring
-from wouso.core.scoring.models import Formula
+from wouso.core.scoring.models import Formula, Coin
 from wouso.games.challenge.views import challenge_random, launch
+from wouso.interface.top.models import Top, TopUser, History
 
 Challenge.LIMIT = 5
 
@@ -136,6 +137,56 @@ class ChallengeTestCase(WousoTest):
         formula.save()
         chall.played()
 
+    def test_scoring_win(self):
+        initial_points = 10
+        winner = self._get_player(1).get_extension(ChallengeUser)
+        loser = self._get_player(2).get_extension(ChallengeUser)
+
+        # Setup scoring
+        scoring.setup_scoring()
+        Coin.add('points')
+
+        # Give initial points
+        scoring.score_simple(winner, 'points', initial_points)
+        scoring.score_simple(loser, 'points', initial_points)
+
+        # Set formula
+        win_points = 6
+        formula = Formula.get('chall-won')
+        formula.expression = 'points=' + str(win_points)
+        formula.save()
+
+        # Play challenge
+        chall = Challenge.create(user_from=winner, user_to=loser, ignore_questions=True)
+        chall.set_won_by_player(winner)
+
+        self.assertEqual(winner.player_ptr.points, initial_points + win_points)
+
+    def test_scoring_loss(self):
+        initial_points = 10
+        winner = self._get_player(1).get_extension(ChallengeUser)
+        loser = self._get_player(2).get_extension(ChallengeUser)
+
+        # Setup scoring
+        scoring.setup_scoring()
+        Coin.add('points')
+
+        # Give initial points
+        scoring.score_simple(winner, 'points', initial_points)
+        scoring.score_simple(loser, 'points', initial_points)
+
+        # Set formula
+        loss_points = -2
+        formula = Formula.get('chall-lost')
+        formula.expression = 'points=' + str(loss_points)
+        formula.save()
+
+        # Play challenge
+        chall = Challenge.create(user_from=winner, user_to=loser, ignore_questions=True)
+        chall.set_won_by_player(winner)
+
+        self.assertEqual(loser.player_ptr.points, initial_points + loss_points) # loss_points is negative
+
     def test_variable_timer(self):
         formula = Formula.add('chall-timer')
         formula.expression = 'tlimit=10'
@@ -147,6 +198,71 @@ class ChallengeTestCase(WousoTest):
         formula.save()
 
         self.assertEqual(scoring.timer(self.chall_user, ChallengeGame, 'chall-timer', level=self.chall_user.level_no), self.chall_user.level_no)
+
+    def test_in_same_division(self):
+        n = 100
+        points_offset = 10000
+        division_range = 20
+
+        players = [self._get_player(i).get_extension(ChallengeUser) for i in xrange(n)]
+
+        # Add an offset value to every user's points in order to avoid top overlapping with other test users.
+        for i in xrange(n):
+            scoring.score_simple(players[i], 'points', points_offset + i * 10)
+
+        # Update players top.
+        for i, u in enumerate(Player.objects.all().order_by('-points')):
+            topuser = u.get_extension(TopUser)
+            position = i + 1
+            hs, created = History.objects.get_or_create(user=topuser, date=datetime.now().date(), relative_to=None)
+            hs.position, hs.points = position, u.points
+            hs.save()
+
+        # Check first player.
+        self.assertTrue(players[n-1].in_same_division(players[n-2]))
+        self.assertTrue(players[n-1].in_same_division(players[max(0, n-1-division_range)]))
+
+        # Check last player.
+        self.assertTrue(players[0].in_same_division(players[1]))
+        self.assertTrue(players[0].in_same_division(players[min(n-1, division_range)]))
+
+        # Check middle player.
+        t = n / 2
+        self.assertTrue(players[t].in_same_division(players[max(0, t-division_range)]))
+        self.assertTrue(players[t].in_same_division(players[min(n-1, t+division_range)]))
+        self.assertTrue(players[t].in_same_division(players[t-1]))
+        self.assertTrue(players[t].in_same_division(players[t+1]))
+
+    def test_not_in_same_division(self):
+        n = 100
+        points_offset = 10000
+        division_range = 20
+
+        players = [self._get_player(i).get_extension(ChallengeUser) for i in xrange(n)]
+
+        # Add an offset value to every user's points in order to avoid top overlapping with other test users.
+        for i in xrange(n):
+            scoring.score_simple(players[i], 'points', points_offset + i*10)
+
+        # Update players top.
+        for i, u in enumerate(Player.objects.all().order_by('-points')):
+            topuser = u.get_extension(TopUser)
+            position = i + 1
+            hs, created = History.objects.get_or_create(user=topuser, date=datetime.now().date(), relative_to=None)
+            hs.position, hs.points = position, u.points
+            hs.save()
+
+        # Check first player.
+        self.assertFalse(players[n-1].in_same_division(players[max(0, n-1-division_range-1)]))
+
+        # Check last player.
+        self.assertFalse(players[0].in_same_division(players[min(n-1, division_range+1)]))
+
+        # Check middle player.
+        t = n / 2
+        self.assertFalse(players[t].in_same_division(players[max(0, t-division_range-1)]))
+        self.assertFalse(players[t].in_same_division(players[min(n-1, t+division_range+1)]))
+
 
 class ChallengeApi(WousoTest):
     def setUp(self):
@@ -349,19 +465,19 @@ class TestChallengeViews(WousoTest):
         # Test if both challenges are displayed
         self.assertContains(response, 'testuser1</a> vs')
         self.assertContains(response, 'testuser2</a> vs')
-    
+
     def test_challenge_is_not_runnable_when_it_is_not_accepted(self):
         # Challenge is launched but not accepted
         self.ch.status = 'L'
         self.ch.save()
-        response = self.c.get(reverse('view_challenge', args=[1]), follow=True)
+        response = self.c.get(reverse('view_challenge', args=[self.ch.id]), follow=True)
         self.assertContains(response, _('The challenge was not accepted'))
 
     def test_challenge_is_not_runnable_when_it_is_refused(self):
         # Challenge is refused
         self.ch.status = 'R'
         self.ch.save()
-        response = self.c.get(reverse('view_challenge', args=[1]), follow=True)
+        response = self.c.get(reverse('view_challenge', args=[self.ch.id]), follow=True)
         self.assertContains(response, _('The challenge was refused'))
 
     def test_challenge_is_not_runnable_more_than_once(self):
@@ -371,14 +487,14 @@ class TestChallengeViews(WousoTest):
         participant.played = True
         participant.score = 200
         participant.save()
-        response = self.c.get(reverse('view_challenge', args=[1]), follow=True)
+        response = self.c.get(reverse('view_challenge', args=[self.ch.id]), follow=True)
         self.assertContains(response, _('You have already submitted this challenge'))
-    
+
     def test_challenge_is_runnable(self):
         # Challenge is accepted, display the challenge
         self.ch.status = 'A'
         self.ch.save()
-        response = self.c.get(reverse('view_challenge', args=[1]))
+        response = self.c.get(reverse('view_challenge', args=[self.ch.id]))
         self.assertContains(response, 'first answer')
         self.assertContains(response, 'second answer')
 
@@ -386,33 +502,38 @@ class TestChallengeViews(WousoTest):
         self.ch.status = 'A'
         self.ch.save()
         # Run the challenge
-        response = self.c.get(reverse('view_challenge', args=[1])) 
+        response = self.c.get(reverse('view_challenge', args=[self.ch.id]))
         # Submit the challenge
-        data = {u'answer_1': [u'1'], 'answer_2': [u'1']}
-        response = self.c.post(reverse('view_challenge', args=[1]), data)
+        data = {self.question1.id: [u'answer_%d' %(self.answer1.id)],
+                self.question2.id: [u'answer_%d' %(self.answer2.id)]}
+        response = self.c.post(reverse('view_challenge', args=[self.ch.id]), data)
         self.assertContains(response, 'You scored')
         # Try to submit it again
-        response = self.c.post(reverse('view_challenge', args=[1]), data, follow=True)
+        response = self.c.post(reverse('view_challenge', args=[self.ch.id]), data, follow=True)
         self.assertContains(response, 'You have already submitted')
 
     def test_challenge_cannot_be_submitted_when_it_is_not_accepted(self):
         self.ch.status = 'L'
         self.ch.save()
-        data = {u'answer_1': [u'1'], 'answer_2': [u'1']}
-        response = self.c.post(reverse('view_challenge', args=[1]), data, follow=True)
+        # Submit the challenge
+        data = {self.question1.id: [u'answer_%d' %(self.answer1.id)],
+                self.question2.id: [u'answer_%d' %(self.answer2.id)]}
+        response = self.c.post(reverse('view_challenge', args=[self.ch.id]), data, follow=True)
         self.assertContains(response, 'The challenge was not accepted')
 
     def test_challenge_cannot_be_submitted_when_it_is_refused(self):
         self.ch.status = 'R'
         self.ch.save()
-        data = {u'answer_1': [u'1'], 'answer_2': [u'1']}
-        response = self.c.post(reverse('view_challenge', args=[1]), data, follow=True)
+        # Submit the challenge
+        data = {self.question1.id: [u'answer_%d' %(self.answer1.id)],
+                self.question2.id: [u'answer_%d' %(self.answer2.id)]}
+        response = self.c.post(reverse('view_challenge', args=[self.ch.id]), data, follow=True)
         self.assertContains(response, 'The challenge was refused')
 
     def test_challenge_history(self):
         self.ch.status = 'A'
         self.ch.save()
-        response = self.c.get(reverse('challenge_history', args=[1])) 
+        response = self.c.get(reverse('challenge_history', args=[self.ch_player1.id]))
         self.assertContains(response, 'testuser1</a> vs.')
         self.assertContains(response, 'Result:')
         self.assertContains(response, 'Pending [A]')
@@ -443,7 +564,7 @@ class TestChallengeViews(WousoTest):
         self.ch.user_to.seconds_took = 50
         self.ch.user_to.save()
 
-        response = self.c.get(reverse('detailed_challenge_stats', args=[2]))
+        response = self.c.get(reverse('detailed_challenge_stats', args=[self.ch_player2.id]))
         self.assertContains(response, 'testuser1 - testuser2')
         self.assertContains(response, '100')
         self.assertContains(response, '200')
@@ -464,7 +585,7 @@ class TestChallengeViews(WousoTest):
         self.ch.user_to.seconds_took = 50
         self.ch.user_to.save()
 
-        response = self.c.get(reverse('detailed_challenge_stats', args=[2, 1]))
+        response = self.c.get(reverse('detailed_challenge_stats', args=[self.ch_player2.id, self.ch_player1.id]))
         self.assertContains(response, 'testuser2 - testuser1')
         self.assertContains(response, '100')
         self.assertContains(response, '200')
@@ -491,7 +612,7 @@ class TestChallengeViews(WousoTest):
         self.ch.save()
         self.ch.user_to.seconds_took = 100
         self.ch.user_to.save()
-        response = self.c.get(reverse('challenge_stats', args=[2]))
+        response = self.c.get(reverse('challenge_stats', args=[self.ch_player2.id]))
         self.assertContains(response, 'Challenges - testuser2')
         self.assertContains(response, 'Challenges played:  1')
         self.assertContains(response, 'Challenges sent:  0')
@@ -510,7 +631,7 @@ class TestChallengeViews(WousoTest):
         # Button is displayed for a different user
         self.c.login(username='testuser2', password='test')
         response = self.c.get(reverse('player_profile', args=[self.ch_player1.pk]))
-        self.assertContains(response, _('Challenge!'))
+        self.assertContains(response, _('Challenge'))
 
     def test_admin_button_challenges(self):
         admin = self._get_superuser()
@@ -526,3 +647,4 @@ class TestChallengeViews(WousoTest):
         response = self.c.get(reverse('player_profile', args=[self.ch_player2.pk]))
         self.assertContains(response,
                     '<a class="button" href="%s">%s</a>' % (url, _('Challenges')))
+

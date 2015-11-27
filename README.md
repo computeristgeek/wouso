@@ -4,6 +4,13 @@
 
 World of USO is a quiz game framework. It has been used since 2007 as a support game for the Introduction to Operating Systems class (USO) by 1st year students at the Faculty of Automatic Control and Computers, University POLITEHNICA of Bucharest.
 
+## Easy install
+
+On a Debian-based system run the install script:
+
+    ./install.sh
+
+If everything installs succesfully go to step 9 to start the server.
 
 ## Requirements
 
@@ -16,10 +23,19 @@ The following packages need to be installed:
 * python-virtualenv
 * libldap2-dev
 * libsasl2-dev
+* libssl-dev
 
-On a Debian-based system run the command:
+On a **Debian-based** system run the command:
 
-    sudo apt-get install python2.7 python-pip python-django python-dev python-virtualenv libldap2-dev libsasl2-dev
+    sudo apt-get install python2.7 python-pip python-django python-dev python-virtualenv libldap2-dev libsasl2-dev libssl-dev
+
+On a **Fedora 22** system run the command:
+
+    sudo dnf -y install python-pip python-django python-devel python-virtualenv openldap-devel libgsasl-devel openssl-devel
+
+On a **Fedora 21 or lower** system run the command:
+
+    sudo yum -y install python-pip python-django python-devel python-virtualenv openldap-devel libgsasl-devel openssl-devel
 
 In case of MySQL support:
 
@@ -34,7 +50,6 @@ In case of MySQL support:
 
         cd $PATH_TO_WOUSO_REPOSITORY
         virtualenv -p python2.7 sandbox
-        echo '*' > sandbox/.gitignore
         source sandbox/bin/activate
 
     `$PATH_TO_WOUSO_REPOSITORY` is the location of the clone of the WoUSO repository.
